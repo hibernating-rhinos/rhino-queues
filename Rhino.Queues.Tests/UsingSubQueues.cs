@@ -21,8 +21,11 @@ namespace Rhino.Queues.Tests
 				Directory.Delete("test2.esent", true);
 
 			sender = new QueueManager(new IPEndPoint(IPAddress.Loopback, 23456), "test.esent");
+		    sender.Start();
+
 			receiver = new QueueManager(new IPEndPoint(IPAddress.Loopback, 23457), "test2.esent");
 			receiver.CreateQueues("h", "a");
+            receiver.Start();
 		}
 
 		[Fact]
@@ -51,7 +54,7 @@ namespace Rhino.Queues.Tests
 		}
 
 		[Fact]
-		public void Can_move_msg_to_subqueue()
+		public void Can_remove_and_move_msg_to_subqueue()
 		{
 			using (var tx = new TransactionScope())
 			{
@@ -85,7 +88,7 @@ namespace Rhino.Queues.Tests
 		}
 
 		[Fact]
-		public void Moving_to_subqueue_move_from_main_queue()
+		public void Can_peek_and_move_msg_to_subqueue()
 		{
 			using (var tx = new TransactionScope())
 			{
@@ -99,9 +102,44 @@ namespace Rhino.Queues.Tests
 				tx.Complete();
 			}
 
+            var message = receiver.Peek("h");
+            
+            using (var tx = new TransactionScope())
+			{
+				receiver.MoveTo("b", message);
+
+				tx.Complete();
+			}
+
 			using (var tx = new TransactionScope())
 			{
-				var message = receiver.Receive("h");
+				message = receiver.Receive("h", "b");
+
+				Assert.Equal("subzero", Encoding.Unicode.GetString(message.Data));
+
+				tx.Complete();
+			}
+		}
+
+		[Fact]
+		public void Moving_to_subqueue_should_remove_from_main_queue()
+		{
+			using (var tx = new TransactionScope())
+			{
+				sender.Send(
+					new Uri("rhino.queues://localhost:23457/h"),
+					new MessagePayload
+					{
+						Data = Encoding.Unicode.GetBytes("subzero")
+					});
+
+				tx.Complete();
+			}
+
+            var message = receiver.Peek("h");
+            
+            using (var tx = new TransactionScope())
+			{
 
 				receiver.MoveTo("b", message);
 

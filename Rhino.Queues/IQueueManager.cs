@@ -19,6 +19,7 @@ namespace Rhino.Queues
         IPEndPoint Endpoint { get; }
         string[] Queues { get; }
         event Action<Endpoint> FailedToSendMessagesTo;
+        void EnablePerformanceCounters();
         void WaitForAllMessagesToBeSent();
         IQueue GetQueue(string queue);
         PersistentMessage[] GetAllMessages(string queueName, string subqueue);
@@ -42,5 +43,12 @@ namespace Rhino.Queues
         int GetNumberOfMessages(string queueName);
         void FailedToSendTo(Endpoint endpointThatWeFailedToSendTo);
     	void DisposeRudely();
+
+        event Action<object, MessageEventArgs> MessageQueuedForSend;
+        event Action<object, MessageEventArgs> MessageSent;
+        event Action<object, MessageEventArgs> MessageQueuedForReceive;
+        event Action<object, MessageEventArgs> MessageReceived;
+
+        void OnMessageSent(MessageEventArgs messageEventArgs);
     }
 }

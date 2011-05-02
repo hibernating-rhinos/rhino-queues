@@ -7,6 +7,7 @@ using System.Transactions;
 using log4net;
 using Rhino.Queues.Internal;
 using Rhino.Queues.Model;
+using Rhino.Queues.Monitoring;
 using Rhino.Queues.Protocol;
 using Rhino.Queues.Storage;
 using System.Linq;
@@ -24,24 +25,28 @@ namespace Rhino.Queues
 		[ThreadStatic]
 		private static Transaction CurrentlyEnslistedTransaction;
 
-		private volatile bool wasDisposed;
+        private volatile bool wasStarted;
+        private volatile bool wasDisposed;
 		private volatile int currentlyInCriticalReceiveStatus;
 		private volatile int currentlyInsideTransaction;
 		private readonly IPEndPoint endpoint;
 		private readonly object newMessageArrivedLock = new object();
 		private readonly string path;
-		private readonly Timer purgeOldDataTimer;
+		private Timer purgeOldDataTimer;
 		private readonly QueueStorage queueStorage;
-		private readonly Receiver receiver;
-		private readonly Thread sendingThread;
-		private readonly QueuedMessagesSender queuedMessagesSender;
-		private readonly ILog logger = LogManager.GetLogger(typeof(QueueManager));
-		private volatile bool waitingForAllMessagesToBeSent;
+
+        private Receiver receiver;
+		private Thread sendingThread;
+		private QueuedMessagesSender queuedMessagesSender;
+        private readonly ILog logger = LogManager.GetLogger(typeof(QueueManager));
+        private PerformanceMonitor monitor;
+        private volatile bool waitingForAllMessagesToBeSent;
+
 
 		private readonly ThreadSafeSet<MessageId> receivedMsgs = new ThreadSafeSet<MessageId>();
 		private bool disposing;
 
-		public int NumberOfReceivedMessagesToKeep { get; set; }
+	    public int NumberOfReceivedMessagesToKeep { get; set; }
 		public int? NumberOfMessagesToKeepInProcessedQueues { get; set; }
 		public int? NumberOfMessagesToKeepOutgoingQueues { get; set; }
 
@@ -49,6 +54,12 @@ namespace Rhino.Queues
 		public TimeSpan? OldestMessageInOutgoingQueues { get; set; }
 
 		public event Action<Endpoint> FailedToSendMessagesTo;
+
+        public event Action<object, MessageEventArgs> MessageQueuedForSend;
+
+        public event Action<object, MessageEventArgs> MessageSent;
+        public event Action<object, MessageEventArgs> MessageQueuedForReceive;
+        public event Action<object, MessageEventArgs> MessageReceived;
 
 		public QueueManager(IPEndPoint endpoint, string path)
 		{
@@ -70,24 +81,34 @@ namespace Rhino.Queues
 				actions.Commit();
 			});
 
-			receiver = new Receiver(endpoint, AcceptMessages);
-			receiver.Start();
-
 			HandleRecovery();
-
-			queuedMessagesSender = new QueuedMessagesSender(queueStorage, this);
-			sendingThread = new Thread(queuedMessagesSender.Send)
-			{
-				IsBackground = true,
-				Name = "Rhino Queue Sender Thread for " + path
-			};
-			sendingThread.Start();
-			purgeOldDataTimer = new Timer(PurgeOldData, null,
-				TimeSpan.FromMinutes(3),
-				TimeSpan.FromMinutes(3));
 		}
 
-		private void PurgeOldData(object ignored)
+        public void Start()
+        {
+            AssertNotDisposedOrDisposing();
+
+            if(wasStarted)
+                throw new InvalidOperationException("The Start method may not be invoked more than once.");
+            
+            wasStarted = true;
+
+            receiver = new Receiver(endpoint, AcceptMessages);
+            receiver.Start();
+
+            queuedMessagesSender = new QueuedMessagesSender(queueStorage, this);
+            sendingThread = new Thread(queuedMessagesSender.Send)
+            {
+                IsBackground = true,
+                Name = "Rhino Queue Sender Thread for " + path
+            };
+            sendingThread.Start();
+            purgeOldDataTimer = new Timer(PurgeOldData, null,
+                                          TimeSpan.FromMinutes(3),
+                                          TimeSpan.FromMinutes(3));
+        }
+
+        private void PurgeOldData(object ignored)
 		{
 			logger.DebugFormat("Starting to purge old data");
 			try
@@ -153,7 +174,15 @@ namespace Rhino.Queues
 				TransactionManager.RecoveryComplete(queueStorage.Id);
 		}
 
-		public string Path
+        public void EnablePerformanceCounters()
+        {
+            if(wasStarted)
+                throw new InvalidOperationException("Performance counters cannot be enabled after the queue has been started.");
+
+            monitor = new PerformanceMonitor(this);
+        }
+        
+        public string Path
 		{
 			get { return path; }
 		}
@@ -172,7 +201,10 @@ namespace Rhino.Queues
 
 			DisposeResourcesWhoseDisposalCannotFail();
 
-			queueStorage.Dispose();
+            if (monitor != null)
+                monitor.Dispose();
+            
+            queueStorage.Dispose();
 
 			// only after we finish incoming recieves, and finish processing
 			// active transactions can we mark it as disposed
@@ -193,7 +225,7 @@ namespace Rhino.Queues
 			wasDisposed = true;
 		}
 
-		private void DisposeResourcesWhoseDisposalCannotFail()
+	    private void DisposeResourcesWhoseDisposalCannotFail()
 		{
 			disposing = true;
 
@@ -202,14 +234,17 @@ namespace Rhino.Queues
 				Monitor.PulseAll(newMessageArrivedLock);
 			}
 
-			purgeOldDataTimer.Dispose();
+            if (wasStarted)
+            {
+                purgeOldDataTimer.Dispose();
 
-			queuedMessagesSender.Stop();
-			sendingThread.Join();
+                queuedMessagesSender.Stop();
+                sendingThread.Join();
 
-			receiver.Dispose();
+                receiver.Dispose();
+            }
 
-			while (currentlyInCriticalReceiveStatus > 0)
+		    while (currentlyInCriticalReceiveStatus > 0)
 			{
 				logger.WarnFormat("Waiting for {0} messages that are currently in critical receive status", currentlyInCriticalReceiveStatus);
 				Thread.Sleep(TimeSpan.FromSeconds(1));
@@ -237,7 +272,7 @@ namespace Rhino.Queues
 				throw new ObjectDisposedException("QueueManager");
 		}
 
-		public void WaitForAllMessagesToBeSent()
+	    public void WaitForAllMessagesToBeSent()
 		{
 			waitingForAllMessagesToBeSent = true;
 			try
@@ -381,16 +416,20 @@ namespace Rhino.Queues
 			while (true)
 			{
 				var message = GetMessageFromQueue(queueName, subqueue);
-				if (message != null)
-					return message;
-
-				lock (newMessageArrivedLock)
+                if (message != null)
+                {
+                    OnMessageReceived(message);
+                    return message;
+                }
+			    lock (newMessageArrivedLock)
 				{
 					message = GetMessageFromQueue(queueName, subqueue);
-					if (message != null)
-						return message;
-
-					var sp = Stopwatch.StartNew();
+                    if (message != null)
+                    {
+                        OnMessageReceived(message);
+                        return message;
+                    }
+				    var sp = Stopwatch.StartNew();
 					if (Monitor.Wait(newMessageArrivedLock, remaining) == false)
 						throw new TimeoutException("No message arrived in the specified timeframe " + timeout);
 				    var newRemaining = remaining - sp.Elapsed;
@@ -405,8 +444,7 @@ namespace Rhino.Queues
 				throw new CannotSendWhileWaitingForAllMessagesToBeSentException("Currently waiting for all messages to be sent, so we cannot send. You probably have a race condition in your application.");
 
 			EnsureEnslistment();
-
-			var parts = uri.AbsolutePath.Substring(1).Split('/');
+            var parts = uri.AbsolutePath.Substring(1).Split('/');
 			var queue = parts[0];
 			string subqueue = null;
 			if (parts.Length > 1)
@@ -414,22 +452,38 @@ namespace Rhino.Queues
 				subqueue = string.Join("/", parts.Skip(1).ToArray());
 			}
 
-			Guid msgId = Guid.Empty;
-			queueStorage.Global(actions =>
+            Guid msgId = Guid.Empty;
+
+            var port = uri.Port;
+            if (port == -1)
+                port = 2200;
+            var destination = new Endpoint(uri.Host, port);
+            
+            queueStorage.Global(actions =>
 			{
-				var port = uri.Port;
-				if (port == -1)
-					port = 2200;
-				msgId = actions.RegisterToSend(new Endpoint(uri.Host, port), queue,
+			    msgId = actions.RegisterToSend(destination, queue,
 											   subqueue, payload, Enlistment.Id);
 
 				actions.Commit();
 			});
-			return new MessageId
-			{
-				SourceInstanceId = queueStorage.Id,
-				MessageIdentifier = msgId
-			};
+
+		    var messageId = new MessageId
+		                        {
+		                            SourceInstanceId = queueStorage.Id,
+		                            MessageIdentifier = msgId
+		                        };
+            var message = new Message
+            {
+                Id = messageId,
+                Data = payload.Data,
+                Headers = payload.Headers,
+                Queue = queue,
+                SubQueue = subqueue
+            };
+
+            OnMessageQueuedForSend(new MessageEventArgs(destination, message));
+
+            return messageId;
 		}
 
 		private void EnsureEnslistment()
@@ -498,7 +552,7 @@ namespace Rhino.Queues
 			return message;
 		}
 
-		private IMessageAcceptance AcceptMessages(Message[] msgs)
+		protected virtual IMessageAcceptance AcceptMessages(Message[] msgs)
 		{
 			var bookmarks = new List<MessageBookmark>();
 			queueStorage.Global(actions =>
@@ -511,8 +565,7 @@ namespace Rhino.Queues
 				}
 				actions.Commit();
 			});
-			var msgIds = msgs.Select(m => m.Id).ToArray();
-			return new MessageAcceptance(this, bookmarks, msgIds, queueStorage);
+			return new MessageAcceptance(this, bookmarks, msgs, queueStorage);
 		}
 
 		#region Nested type: MessageAcceptance
@@ -520,18 +573,18 @@ namespace Rhino.Queues
 		private class MessageAcceptance : IMessageAcceptance
 		{
 			private readonly IList<MessageBookmark> bookmarks;
-			private readonly IEnumerable<MessageId> messageIds;
+			private readonly IEnumerable<Message> messages;
 			private readonly QueueManager parent;
 			private readonly QueueStorage queueStorage;
 
 			public MessageAcceptance(QueueManager parent,
 				IList<MessageBookmark> bookmarks,
-				IEnumerable<MessageId> messageIds,
+				IEnumerable<Message> messages,
 				QueueStorage queueStorage)
 			{
 				this.parent = parent;
 				this.bookmarks = bookmarks;
-				this.messageIds = messageIds;
+				this.messages = messages;
 				this.queueStorage = queueStorage;
 #pragma warning disable 420
 				Interlocked.Increment(ref parent.currentlyInCriticalReceiveStatus);
@@ -552,15 +605,20 @@ namespace Rhino.Queues
 							actions.GetQueue(bookmark.QueueName)
 								.SetMessageStatus(bookmark, MessageStatus.ReadyToDeliver);
 						}
-						foreach (var id in messageIds)
+						foreach (var msg in messages)
 						{
-							actions.MarkReceived(id);
+							actions.MarkReceived(msg.Id);
 						}
 						actions.Commit();
 					});
-					parent.receivedMsgs.Add(messageIds);
+					parent.receivedMsgs.Add(messages.Select(m => m.Id));
 
-					lock (parent.newMessageArrivedLock)
+                    foreach (var msg in messages)
+                    {
+                        parent.OnMessageQueuedForReceive(msg);
+                    }
+                    
+                    lock (parent.newMessageArrivedLock)
 					{
 						Monitor.PulseAll(parent.newMessageArrivedLock);
 					}
@@ -648,34 +706,54 @@ namespace Rhino.Queues
 					);
 				actions.Commit();
 			});
+
+            if(((PersistentMessage)message).Status == MessageStatus.ReadyToDeliver)
+                OnMessageReceived(message);
+
+		    var updatedMessage = new Message
+		                             {
+		                                 Id = message.Id,
+		                                 Data = message.Data,
+		                                 Headers = message.Headers,
+		                                 Queue = message.Queue,
+		                                 SubQueue = subqueue,
+		                                 SentAt = message.SentAt
+		                             };
+		
+            OnMessageQueuedForReceive(updatedMessage);
 		}
 
 		public void EnqueueDirectlyTo(string queue, string subqueue, MessagePayload payload)
 		{
 			EnsureEnslistment();
 
-			queueStorage.Global(actions =>
+            var message = new PersistentMessage
+            {
+                Data = payload.Data,
+                Headers = payload.Headers,
+                Id = new MessageId
+                {
+                    SourceInstanceId = queueStorage.Id,
+                    MessageIdentifier = GuidCombGenerator.Generate()
+                },
+                Queue = queue,
+                SentAt = DateTime.Now,
+                SubQueue = subqueue,
+                Status = MessageStatus.EnqueueWait
+            };
+            
+            queueStorage.Global(actions =>
 			{
 				var queueActions = actions.GetQueue(queue);
 
-				var bookmark = queueActions.Enqueue(new PersistentMessage
-				{
-					Data = payload.Data,
-					Headers = payload.Headers,
-					Id = new MessageId
-					{
-						SourceInstanceId = queueStorage.Id,
-						MessageIdentifier = GuidCombGenerator.Generate()
-					},
-					Queue = queue,
-					SentAt = DateTime.Now,
-					SubQueue = subqueue,
-					Status = MessageStatus.EnqueueWait
-				});
+			    var bookmark = queueActions.Enqueue(message);
 				actions.RegisterUpdateToReverse(Enlistment.Id, bookmark, MessageStatus.EnqueueWait, subqueue);
 
 				actions.Commit();
 			});
+
+            OnMessageQueuedForReceive(message);
+
 			lock (newMessageArrivedLock)
 			{
 				Monitor.PulseAll(newMessageArrivedLock);
@@ -727,5 +805,39 @@ namespace Rhino.Queues
 			if (action != null)
 				action(endpointThatWeFailedToSendTo);
 		}
-	}
+
+        public void OnMessageQueuedForSend(MessageEventArgs messageEventArgs)
+        {
+            var action = MessageQueuedForSend;
+            if (action != null) action(this, messageEventArgs);
+        }
+
+        public void OnMessageSent(MessageEventArgs messageEventArgs)
+        {
+            var action = MessageSent;
+            if (action != null) action(this, messageEventArgs);
+        }
+
+        private void OnMessageQueuedForReceive(Message message)
+        {
+            OnMessageQueuedForReceive(new MessageEventArgs(null, message));
+        }
+
+        public void OnMessageQueuedForReceive(MessageEventArgs messageEventArgs)
+        {
+            var action = MessageQueuedForReceive;
+            if (action != null) action(this, messageEventArgs);
+        }
+
+        private void OnMessageReceived(Message message)
+        {
+            OnMessageReceived(new MessageEventArgs(null, message));
+        }
+
+        public void OnMessageReceived(MessageEventArgs messageEventArgs)
+        {
+            var action = MessageReceived;
+            if (action != null) action(this, messageEventArgs);
+        }
+    }
 }
