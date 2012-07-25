@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Web;
-using log4net;
+
 using Microsoft.Isam.Esent.Interop;
 using Rhino.Queues.Model;
 using Rhino.Queues.Protocol;
@@ -14,7 +14,7 @@ namespace Rhino.Queues.Storage
 
 	public class QueueActions : IDisposable
 	{
-		private readonly ILog logger = LogManager.GetLogger(typeof(QueueActions));
+        private readonly ILog logger = LogManager.GetLogger(typeof(QueueActions));
 		private readonly Session session;
 		private readonly string queueName;
 		private string[] subqueues;

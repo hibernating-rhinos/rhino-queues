@@ -2,14 +2,14 @@ using System;
 using System.IO;
 using System.Runtime.ConstrainedExecution;
 using System.Threading;
-using log4net;
+
 using Microsoft.Isam.Esent.Interop;
 
 namespace Rhino.Queues.Storage
 {
 	public class QueueStorage : CriticalFinalizerObject, IDisposable
 	{
-		private readonly ILog log = LogManager.GetLogger(typeof(QueueStorage));
+        private readonly ILog log = LogManager.GetLogger(typeof(QueueStorage));
 		private JET_INSTANCE instance;
 		private readonly string database;
 		private readonly string path;

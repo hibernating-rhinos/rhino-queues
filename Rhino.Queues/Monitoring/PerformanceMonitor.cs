@@ -2,7 +2,8 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Transactions;
-using log4net;
+using Rhino.Queues.Storage;
+
 
 namespace Rhino.Queues.Monitoring
 {

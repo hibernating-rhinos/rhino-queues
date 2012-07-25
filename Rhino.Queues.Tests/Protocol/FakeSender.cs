@@ -2,12 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Net.Sockets;
 using System.Text;
-using log4net;
 using Rhino.Queues.Exceptions;
 using Rhino.Queues.Model;
 using Rhino.Queues.Protocol;
 using Rhino.Queues.Storage;
 using Wintellect.Threading.AsyncProgModel;
+using ILog = Rhino.Queues.Storage.ILog;
 
 namespace Rhino.Queues.Tests.Protocol
 {

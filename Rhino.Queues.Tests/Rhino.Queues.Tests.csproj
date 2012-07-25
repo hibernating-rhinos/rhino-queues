@@ -41,10 +41,6 @@
       <SpecificVersion>False</SpecificVersion>
       <HintPath>..\SharedLibs\Esent.Interop.dll</HintPath>
     </Reference>
-    <Reference Include="log4net, Version=1.2.10.0, Culture=neutral, PublicKeyToken=1b44e1d426115821, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\SharedLibs\log4net.dll</HintPath>
-    </Reference>
     <Reference Include="Rhino.Mocks, Version=3.6.0.0, Culture=neutral, PublicKeyToken=0b3305902db7183f, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
       <HintPath>..\SharedLibs\Rhino.Mocks.dll</HintPath>
@@ -82,7 +78,6 @@
     <Compile Include="Errors.cs" />
     <Compile Include="FromUsers\FromRene.cs" />
     <Compile Include="OperationsOnUnstartedQueues.cs" />
-    <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Protocol\CanSendAndReceive.cs" />
     <Compile Include="Protocol\RecieverFailure.cs" />
     <Compile Include="Protocol\SendingFailure.cs" />
@@ -123,6 +118,9 @@
       <ProductName>Windows Installer 3.1</ProductName>
       <Install>true</Install>
     </BootstrapperPackage>
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="Properties\" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
