@@ -1,32 +1,112 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
-using log4net;
-using log4net.Appender;
-using log4net.Core;
-using log4net.Repository.Hierarchy;
 using Rhino.Mocks;
 using Rhino.Queues.Exceptions;
 using Rhino.Queues.Model;
 using Rhino.Queues.Protocol;
+using Rhino.Queues.Storage;
 using Xunit;
 
 namespace Rhino.Queues.Tests.Protocol
 {
+    public class LogMessage
+    {
+        public enum LogLevel
+        {
+            Info,
+            Warn,
+            Debug,
+            Error,
+            Fatal
+        }
+
+        public string RenderedMessage { get; set; }
+        public LogLevel Level { get; set; }
+        public Exception exception { get; set; }
+
+    }
+
+    public class LoggingLogger : ILog
+    {
+        private Type _type;
+        private readonly List<LogMessage> _logMessages = new List<LogMessage>();
+
+        public LoggingLogger(Type typ)
+        {
+            _type = typ;
+        }
+
+        public IEnumerable<LogMessage> LoggerEvents
+        {
+            get { return _logMessages; }
+        }
+
+        public void Info(string message)
+        {
+            _logMessages.Add(new LogMessage {RenderedMessage = message, Level=LogMessage.LogLevel.Info});
+        }
+
+        public void Warn(string message)
+        {
+            _logMessages.Add(new LogMessage { RenderedMessage = message, Level=LogMessage.LogLevel.Warn });
+        }
+
+        public void Warn(string message, Exception exception)
+        {
+            _logMessages.Add(new LogMessage { RenderedMessage = message, Level = LogMessage.LogLevel.Warn, exception = exception});
+        }
+
+        public void Debug(string message)
+        {
+            _logMessages.Add(new LogMessage { RenderedMessage = message, Level = LogMessage.LogLevel.Debug });
+        }
+
+        public void Debug(string message, Exception exception)
+        {
+            _logMessages.Add(new LogMessage { RenderedMessage = message, Level = LogMessage.LogLevel.Debug, exception = exception });
+        }
+
+        public void Error(string message)
+        {
+            _logMessages.Add(new LogMessage { RenderedMessage = message, Level = LogMessage.LogLevel.Error });
+        }
+
+        public void Error(Exception exception)
+        {
+            _logMessages.Add(new LogMessage { Level = LogMessage.LogLevel.Error, exception = exception });
+        }
+
+        public void Error(string message, Exception exception)
+        {
+            _logMessages.Add(new LogMessage { RenderedMessage = message, Level = LogMessage.LogLevel.Error, exception = exception });
+        }
+
+        public void Fatal(string message)
+        {
+            _logMessages.Add(new LogMessage { RenderedMessage = message, Level = LogMessage.LogLevel.Fatal });
+        }
+
+        public void Fatal(string message, Exception exception)
+        {
+            _logMessages.Add(new LogMessage { RenderedMessage = message, Level = LogMessage.LogLevel.Fatal, exception = exception });
+        }
+    }
+
     public class RecieverFailure : WithDebugging, IDisposable
     {
         private readonly ManualResetEvent wait = new ManualResetEvent(false);
         private readonly IPEndPoint endpointToListenTo = new IPEndPoint(IPAddress.Loopback, 23456);
-        private readonly MemoryAppender appender = new MemoryAppender();
-        private readonly Logger logger;
+        private readonly LoggingLogger logger;
 
         public RecieverFailure()
         {
-            logger = ((Logger)(LogManager.GetLogger(typeof(Receiver)).Logger));
-            logger.AddAppender(appender);
+            LogManager.Initialize(x => new LoggingLogger(x));
+            logger = LogManager.GetLogger(typeof(Receiver)) as LoggingLogger;
         }
 
         [Fact]
@@ -44,8 +124,8 @@ namespace Rhino.Queues.Tests.Protocol
 
                 wait.WaitOne();
 
-                var warn = (from e in appender.GetEvents()
-                            where e.Level == Level.Warn &&
+                var warn = (from e in logger.LoggerEvents
+                            where e.Level == LogMessage.LogLevel.Warn &&
                                   e.RenderedMessage.StartsWith("Unable to read length data from")
                             select e).FirstOrDefault();
 
@@ -69,8 +149,8 @@ namespace Rhino.Queues.Tests.Protocol
 
                 wait.WaitOne();
 
-                var warn = (from e in appender.GetEvents()
-                            where e.Level == Level.Warn &&
+                var warn = (from e in logger.LoggerEvents
+                            where e.Level == LogMessage.LogLevel.Warn &&
                                   e.RenderedMessage.StartsWith("Unable to read length data from")
                             select e).FirstOrDefault();
 
@@ -94,8 +174,8 @@ namespace Rhino.Queues.Tests.Protocol
 
                 wait.WaitOne();
 
-                var warn = (from e in appender.GetEvents()
-                            where e.Level == Level.Warn &&
+                var warn = (from e in logger.LoggerEvents
+                            where e.Level == LogMessage.LogLevel.Warn &&
                                   e.RenderedMessage.StartsWith("Got invalid length -2")
                             select e).FirstOrDefault();
 
@@ -121,8 +201,8 @@ namespace Rhino.Queues.Tests.Protocol
 
                 wait.WaitOne();
 
-                var warn = (from e in appender.GetEvents()
-                            where e.Level == Level.Warn &&
+                var warn = (from e in logger.LoggerEvents
+                            where e.Level == LogMessage.LogLevel.Warn &&
                                   e.RenderedMessage.StartsWith("Unable to read message data")
                             select e).FirstOrDefault();
 
@@ -148,8 +228,8 @@ namespace Rhino.Queues.Tests.Protocol
 
                 wait.WaitOne();
 
-                var warn = (from e in appender.GetEvents()
-                            where e.Level == Level.Warn &&
+                var warn = (from e in logger.LoggerEvents
+                            where e.Level == LogMessage.LogLevel.Warn &&
                                   e.RenderedMessage.StartsWith("Failed to deserialize messages from")
                             select e).FirstOrDefault();
 
@@ -372,7 +452,7 @@ namespace Rhino.Queues.Tests.Protocol
 
         public void Dispose()
         {
-            logger.RemoveAppender(appender);
+            //logger.RemoveAppender(logger);
         }
     }
 }

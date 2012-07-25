@@ -1,6 +1,6 @@
 using System;
 using System.Transactions;
-using log4net;
+
 using Rhino.Queues.Storage;
 using Transaction = System.Transactions.Transaction;
 
@@ -11,7 +11,7 @@ namespace Rhino.Queues.Internal
 		private readonly QueueStorage queueStorage;
 		private readonly Action onCompelete;
 		private readonly Action assertNotDisposed;
-		private readonly ILog logger = LogManager.GetLogger(typeof(TransactionEnlistment));
+        private readonly ILog logger = LogManager.GetLogger(typeof(TransactionEnlistment));
 
 		public TransactionEnlistment(QueueStorage queueStorage, Action onCompelete, Action assertNotDisposed)
 		{

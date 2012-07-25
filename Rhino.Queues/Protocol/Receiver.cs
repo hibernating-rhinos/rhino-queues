@@ -5,9 +5,10 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
-using log4net;
+
 using Rhino.Queues.Exceptions;
 using Rhino.Queues.Model;
+using Rhino.Queues.Storage;
 using Wintellect.Threading.AsyncProgModel;
 
 namespace Rhino.Queues.Protocol
