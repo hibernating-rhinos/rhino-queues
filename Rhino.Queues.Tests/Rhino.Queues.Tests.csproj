@@ -40,6 +40,9 @@
     <Reference Include="Common.Logging">
       <HintPath>..\packages\Common.Logging\lib\net35\Common.Logging.dll</HintPath>
     </Reference>
+    <Reference Include="Common.Logging.Core">
+      <HintPath>..\packages\Common.Logging.Core\lib\net35\Common.Logging.Core.dll</HintPath>
+    </Reference>
     <Reference Include="Esent.Interop">
       <HintPath>..\packages\Rhino.ServiceBus.References\lib\Esent.Interop.dll</HintPath>
     </Reference>

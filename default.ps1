@@ -71,6 +71,7 @@ task Release -depends Test {
         *\Rhino.Queues.dll `
         *\Rhino.Queues.pdb `
         *\Common.Logging.dll `
+		*\Common.Logging.Core.dll `
         *\Rhino.Queues.xml `
         *\Esent.Interop.dll `
         *\Esent.Interop.xml `
